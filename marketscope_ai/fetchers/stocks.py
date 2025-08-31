@@ -1,58 +1,129 @@
+# fetchers/stocks.py
+
 import yfinance as yf
 import pandas as pd
-from yahooquery import search  # Needed for search_symbol
+from datetime import datetime, timedelta
 
-def search_symbol(company_name):
-    """
-    Search for the stock symbol based on the company name using yahooquery.
-    Returns the first matching symbol.
-    """
-    try:
-        results = search(company_name)
-        if 'quotes' in results:
-            for quote in results['quotes']:
-                if quote.get('quoteType') in ['EQUITY', 'ETF']:
-                    return quote['symbol']
-        return None
-    except Exception as e:
-        print(f"Error searching for symbol: {e}")
-        return None
 
-def fetch_stock_history(symbol, period='6mo', interval='1d', start=None, end=None):
+class StockFetcher:
     """
-    Fetch historical stock data. If start and end dates are provided, use them instead of period.
+    StockFetcher retrieves and processes stock market data using yfinance.
     """
-    try:
-        ticker = yf.Ticker(symbol)
-        if start and end:
-            hist = ticker.history(start=start, end=end, interval=interval)
-        else:
-            hist = ticker.history(period=period, interval=interval)
 
-        if hist.empty:
+    def __init__(self, ticker: str, period: str = "6mo", interval: str = "1d"):
+        """
+        Initialize the StockFetcher class.
+
+        Args:
+            ticker (str): Stock ticker symbol (e.g., 'AAPL', 'TSLA', 'MSFT').
+            period (str): Time range for fetching data (e.g., '1mo', '6mo', '1y', '5y', 'max').
+            interval (str): Data frequency (e.g., '1d', '1h', '5m').
+        """
+        self.ticker = ticker.upper()
+        self.period = period
+        self.interval = interval
+        self.stock = yf.Ticker(self.ticker)
+
+    def get_historical_data(self) -> pd.DataFrame:
+        """
+        Fetch historical stock price data.
+
+        Returns:
+            pd.DataFrame: Historical OHLCV (Open, High, Low, Close, Volume) data.
+        """
+        try:
+            df = self.stock.history(period=self.period, interval=self.interval)
+            df.reset_index(inplace=True)
+            df["Date"] = pd.to_datetime(df["Date"])
+            return df
+        except Exception as e:
+            print(f"[ERROR] Could not fetch historical data for {self.ticker}: {e}")
             return pd.DataFrame()
 
-        hist.reset_index(inplace=True)
-        if 'Datetime' in hist.columns:
-            hist.rename(columns={'Datetime': 'Date'}, inplace=True)
-        if 'date' in hist.columns:
-            hist.rename(columns={'date': 'Date'}, inplace=True)
+    def get_company_info(self) -> dict:
+        """
+        Fetch basic company information.
 
-        return hist
+        Returns:
+            dict: Dictionary containing company details.
+        """
+        try:
+            info = self.stock.info
+            return {
+                "symbol": self.ticker,
+                "shortName": info.get("shortName", "N/A"),
+                "longName": info.get("longName", "N/A"),
+                "sector": info.get("sector", "N/A"),
+                "industry": info.get("industry", "N/A"),
+                "country": info.get("country", "N/A"),
+                "website": info.get("website", "N/A"),
+                "marketCap": info.get("marketCap", None),
+                "currency": info.get("currency", "N/A"),
+            }
+        except Exception as e:
+            print(f"[ERROR] Could not fetch company info for {self.ticker}: {e}")
+            return {}
 
-    except Exception as e:
-        print(f"[Error] Failed to fetch data for {symbol}: {e}")
-        return pd.DataFrame()
+    def get_current_price(self) -> float:
+        """
+        Fetch the latest stock price.
 
-def fetch_company_info(symbol):
-    """
-    Fetch company information for the given stock symbol using yfinance.
-    Returns a dictionary of available company details.
-    """
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        return info
-    except Exception as e:
-        print(f"Error fetching company info for {symbol}: {e}")
-        return None
+        Returns:
+            float: Current market price.
+        """
+        try:
+            data = self.stock.history(period="1d", interval="1m")
+            if not data.empty:
+                return round(data["Close"].iloc[-1], 2)
+            return None
+        except Exception as e:
+            print(f"[ERROR] Could not fetch current price for {self.ticker}: {e}")
+            return None
+
+    def get_financials(self) -> dict:
+        """
+        Fetch financial statements (income statement, balance sheet, cash flow).
+
+        Returns:
+            dict: Financial data as pandas DataFrames.
+        """
+        try:
+            return {
+                "income_statement": self.stock.financials,
+                "balance_sheet": self.stock.balance_sheet,
+                "cashflow": self.stock.cashflow,
+            }
+        except Exception as e:
+            print(f"[ERROR] Could not fetch financials for {self.ticker}: {e}")
+            return {}
+
+    def get_recommendations(self) -> pd.DataFrame:
+        """
+        Fetch analyst recommendations.
+
+        Returns:
+            pd.DataFrame: Analyst recommendations data.
+        """
+        try:
+            df = self.stock.recommendations
+            return df.reset_index() if df is not None else pd.DataFrame()
+        except Exception as e:
+            print(f"[ERROR] Could not fetch recommendations for {self.ticker}: {e}")
+            return pd.DataFrame()
+
+
+# Example Usage (only runs when testing this file directly)
+if __name__ == "__main__":
+    stock = StockFetcher("AAPL", period="6mo", interval="1d")
+
+    print("🔹 Company Info:")
+    print(stock.get_company_info())
+
+    print("\n🔹 Current Price:")
+    print(stock.get_current_price())
+
+    print("\n🔹 Historical Data (last 5 rows):")
+    print(stock.get_historical_data().tail())
+
+    print("\n🔹 Analyst Recommendations:")
+    print(stock.get_recommendations().head())
