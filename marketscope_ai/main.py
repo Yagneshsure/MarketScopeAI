@@ -1,5 +1,7 @@
 import streamlit as st
 import datetime
+from fetchers.stocks import get_stock_info
+
 
 # --- Main app ---
 def main():
@@ -39,12 +41,16 @@ def main():
         # 1. Enter Symbol with Watermark + Search Button
         placeholder_text = f"Enter {st.session_state.selected_market} symbol or name..."
         user_symbol = st.sidebar.text_input("", placeholder=placeholder_text)
+
         if st.sidebar.button("🔍 Search"):
-            st.sidebar.success(f"Searching for: {user_symbol}")
+            if user_symbol:
+                st.session_state.search_symbol = user_symbol
+            else:
+                st.sidebar.warning("Please enter a symbol")
 
         # 2. Currency Selection
         currency = st.sidebar.selectbox(
-            "Choose Currency", ["USD", "INR", "POUND", "DIRHAM", "RUB"]
+            "Choose Currency", ["USD", "INR", "EUR", "GBP", "AED", "RUB"]
         )
 
         # 3. Interval Selection
@@ -67,6 +73,7 @@ def main():
         # Go Back Option
         if st.sidebar.button("⬅️ Go Back"):
             st.session_state.selected_market = None
+            st.session_state.search_symbol = None
             st.rerun()
 
         # Tabs
@@ -74,9 +81,22 @@ def main():
             ["📊 Overview", "📈 Finances", "📰 News & Sentiment", "🧠 LLM Summary", "💬 Ask AI"]
         )
 
+        # Check if user has searched for a symbol
+        selected_symbol = st.session_state.get("search_symbol", None)
+
         with tab1:
             st.header("📊 Overview")
-            st.write(f"Showing overview for {user_symbol} in {currency}, interval: {interval}")
+            if selected_symbol:
+                stock_info = get_stock_info(selected_symbol, target_currency=currency)
+                if "error" in stock_info:
+                    st.error(stock_info["error"])
+                else:
+                    st.write(f"**{stock_info['name']} ({stock_info['ticker']})**")
+                    st.write(f"Exchange: {stock_info['exchange']}")
+                    st.write(f"Price in {stock_info['native_currency']}: {stock_info['current_price_native']}")
+                    st.write(f"Price in {currency}: {stock_info[f'current_price_{currency}']}")
+            else:
+                st.info("Please enter a symbol and click Search.")
 
         with tab2:
             st.header("📈 Finances")
