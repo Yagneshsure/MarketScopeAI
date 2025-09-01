@@ -1,129 +1,66 @@
-# fetchers/stocks.py
-
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
+from yahooquery import search
+from components.currency import get_stock_price
+
+# Map exchanges to their default currencies
+EXCHANGE_CURRENCY_MAP = {
+    "NSE": "INR", "BSE": "INR",
+    "NYSE": "USD", "NASDAQ": "USD",
+    "TSX": "CAD", "LSE": "GBP",
+    "HKEX": "HKD", "TSE": "JPY",
+    "SSE": "CNY", "SZSE": "CNY",
+    "FWB": "EUR", "ETR": "EUR",
+    "SWX": "CHF", "ASX": "AUD"
+}
 
 
-class StockFetcher:
+def search_symbol(company_name: str):
+    """Search for the stock symbol based on the company name using yahooquery."""
+    try:
+        results = search(company_name)
+        if 'quotes' in results:
+            for quote in results['quotes']:
+                if quote.get('exchange') in EXCHANGE_CURRENCY_MAP:
+                    return quote['symbol']
+        return None
+    except Exception as e:
+        return f"Error while searching symbol: {str(e)}"
+
+
+def fetch_stock_data(symbol: str, period="6mo", interval="1d"):
+    """Fetch historical stock data."""
+    try:
+        stock = yf.Ticker(symbol)
+        hist = stock.history(period=period, interval=interval)
+        hist.reset_index(inplace=True)
+        return hist
+    except Exception as e:
+        return f"Error fetching stock data: {str(e)}"
+
+
+def fetch_company_info(symbol: str):
+    """Fetch company information including name, sector, industry, description."""
+    try:
+        stock = yf.Ticker(symbol)
+        info = stock.info
+        return {
+            "longName": info.get("longName", "N/A"),
+            "sector": info.get("sector", "N/A"),
+            "industry": info.get("industry", "N/A"),
+            "longBusinessSummary": info.get("longBusinessSummary", "No description available")
+        }
+    except Exception as e:
+        return {"error": f"Error fetching company info: {str(e)}"}
+
+
+def fetch_current_price(symbol: str, target_currency="INR"):
     """
-    StockFetcher retrieves and processes stock market data using yfinance.
+    Fetch current stock price and convert to target currency.
+    Uses universal get_stock_price from components.currency.
     """
-
-    def __init__(self, ticker: str, period: str = "6mo", interval: str = "1d"):
-        """
-        Initialize the StockFetcher class.
-
-        Args:
-            ticker (str): Stock ticker symbol (e.g., 'AAPL', 'TSLA', 'MSFT').
-            period (str): Time range for fetching data (e.g., '1mo', '6mo', '1y', '5y', 'max').
-            interval (str): Data frequency (e.g., '1d', '1h', '5m').
-        """
-        self.ticker = ticker.upper()
-        self.period = period
-        self.interval = interval
-        self.stock = yf.Ticker(self.ticker)
-
-    def get_historical_data(self) -> pd.DataFrame:
-        """
-        Fetch historical stock price data.
-
-        Returns:
-            pd.DataFrame: Historical OHLCV (Open, High, Low, Close, Volume) data.
-        """
-        try:
-            df = self.stock.history(period=self.period, interval=self.interval)
-            df.reset_index(inplace=True)
-            df["Date"] = pd.to_datetime(df["Date"])
-            return df
-        except Exception as e:
-            print(f"[ERROR] Could not fetch historical data for {self.ticker}: {e}")
-            return pd.DataFrame()
-
-    def get_company_info(self) -> dict:
-        """
-        Fetch basic company information.
-
-        Returns:
-            dict: Dictionary containing company details.
-        """
-        try:
-            info = self.stock.info
-            return {
-                "symbol": self.ticker,
-                "shortName": info.get("shortName", "N/A"),
-                "longName": info.get("longName", "N/A"),
-                "sector": info.get("sector", "N/A"),
-                "industry": info.get("industry", "N/A"),
-                "country": info.get("country", "N/A"),
-                "website": info.get("website", "N/A"),
-                "marketCap": info.get("marketCap", None),
-                "currency": info.get("currency", "N/A"),
-            }
-        except Exception as e:
-            print(f"[ERROR] Could not fetch company info for {self.ticker}: {e}")
-            return {}
-
-    def get_current_price(self) -> float:
-        """
-        Fetch the latest stock price.
-
-        Returns:
-            float: Current market price.
-        """
-        try:
-            data = self.stock.history(period="1d", interval="1m")
-            if not data.empty:
-                return round(data["Close"].iloc[-1], 2)
-            return None
-        except Exception as e:
-            print(f"[ERROR] Could not fetch current price for {self.ticker}: {e}")
-            return None
-
-    def get_financials(self) -> dict:
-        """
-        Fetch financial statements (income statement, balance sheet, cash flow).
-
-        Returns:
-            dict: Financial data as pandas DataFrames.
-        """
-        try:
-            return {
-                "income_statement": self.stock.financials,
-                "balance_sheet": self.stock.balance_sheet,
-                "cashflow": self.stock.cashflow,
-            }
-        except Exception as e:
-            print(f"[ERROR] Could not fetch financials for {self.ticker}: {e}")
-            return {}
-
-    def get_recommendations(self) -> pd.DataFrame:
-        """
-        Fetch analyst recommendations.
-
-        Returns:
-            pd.DataFrame: Analyst recommendations data.
-        """
-        try:
-            df = self.stock.recommendations
-            return df.reset_index() if df is not None else pd.DataFrame()
-        except Exception as e:
-            print(f"[ERROR] Could not fetch recommendations for {self.ticker}: {e}")
-            return pd.DataFrame()
-
-
-# Example Usage (only runs when testing this file directly)
-if __name__ == "__main__":
-    stock = StockFetcher("AAPL", period="6mo", interval="1d")
-
-    print("🔹 Company Info:")
-    print(stock.get_company_info())
-
-    print("\n🔹 Current Price:")
-    print(stock.get_current_price())
-
-    print("\n🔹 Historical Data (last 5 rows):")
-    print(stock.get_historical_data().tail())
-
-    print("\n🔹 Analyst Recommendations:")
-    print(stock.get_recommendations().head())
+    try:
+        converted_price, currency = get_stock_price(symbol, base_currency=target_currency)
+        return round(converted_price, 2), currency
+    except Exception as e:
+        return f"Error fetching price: {str(e)}", None
