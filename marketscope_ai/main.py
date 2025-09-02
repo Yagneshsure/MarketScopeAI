@@ -191,7 +191,7 @@ def main():
         st.session_state.selected_market = None
 
     if not st.session_state.selected_market:
-        st.title("📌 MarketScopeAI Navigation")
+        st.title(" MarketScopeAI Navigation")
         st.subheader("Choose Market Type")
 
         col1, col2, col3 = st.columns(3)
@@ -320,15 +320,15 @@ def main():
                     if not hist.empty:
                         hist = hist.reset_index()
 
-                        # Enhanced line chart
+                        # Enhanced dark chart
                         fig = go.Figure()
                         fig.add_trace(go.Scatter(
                             x=hist["Date"],
                             y=hist["Close"],
                             mode="lines+markers",
                             name="Closing Price",
-                            line=dict(color="#2b8be6", width=2.5),
-                            marker=dict(size=4, color="#1f77b4"),
+                            line=dict(color="#00FFFF", width=2.5),  # Cyan line
+                            marker=dict(size=4, color="#2b8be6"),
                             hovertemplate="Date: %{x}<br>Price: %{y:.2f}<extra></extra>"
                         ))
 
@@ -337,11 +337,12 @@ def main():
                             title_x=0.5,
                             xaxis_title="Date",
                             yaxis_title=f"Price ({currency})",
-                            template="plotly_white",
+                            template="plotly_dark",  # Dark theme
                             hovermode="x unified",
-                            font=dict(size=14),
+                            font=dict(size=14, color="white"),
                             margin=dict(l=20, r=20, t=40, b=20),
-                            plot_bgcolor="#f9f9f9",
+                            plot_bgcolor="black",
+                            paper_bgcolor="black"
                         )
 
                         st.plotly_chart(fig, use_container_width=True)
@@ -351,6 +352,8 @@ def main():
             else:
                 st.info("Please enter a symbol and click Search.")
 
+
+########################################################################                
         with tab2:
             st.header("📈 Finances")
             st.write("Financial data will appear here...")
