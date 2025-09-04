@@ -1,34 +1,46 @@
+import os
 import requests
-from bs4 import BeautifulSoup
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from dotenv import load_dotenv
+from textblob import TextBlob
 
-analyzer = SentimentIntensityAnalyzer()
+# Load environment variables
+load_dotenv()
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
-def fetch_news_and_sentiment(ticker):
-    url = f"https://www.google.com/search?q={ticker}+stock+news&tbm=nws"
-    headers = {
-        "User-Agent": "Mozilla/5.0"
+def fetch_company_news(symbol: str, language: str = "en", page_size: int = 5):
+    """
+    Fetch latest company news from NewsAPI.
+    """
+    if not NEWS_API_KEY:
+        raise ValueError("NEWS_API_KEY not found in environment variables.")
+
+    url = "https://newsapi.org/v2/everything"
+    params = {
+        "q": symbol,
+        "language": language,
+        "pageSize": page_size,
+        "sortBy": "publishedAt",
+        "apiKey": NEWS_API_KEY
     }
-    
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
 
-    news_items = []
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    data = response.json()
 
-    for item in soup.select("div.dbsr")[:5]:  # Get top 5 news
-        title = item.select_one("div.JheGif.nDgy9d").text if item.select_one("div.JheGif.nDgy9d") else "No Title"
-        link = item.a["href"] if item.a else "#"
-        snippet = item.select_one("div.Y3v8qd").text if item.select_one("div.Y3v8qd") else ""
+    return data.get("articles", [])
 
-        sentiment_score = analyzer.polarity_scores(title + " " + snippet)["compound"]
-        sentiment = "Positive" if sentiment_score > 0.05 else "Negative" if sentiment_score < -0.05 else "Neutral"
+def analyze_sentiment(text: str) -> str:
+    """
+    Perform simple sentiment analysis using TextBlob.
+    Returns: Positive, Negative, Neutral
+    """
+    if not text.strip():
+        return "N/A"
 
-        news_items.append({
-            "title": title,
-            "link": link,
-            "snippet": snippet,
-            "sentiment": sentiment,
-            "score": sentiment_score
-        })
-
-    return news_items
+    polarity = TextBlob(text).sentiment.polarity
+    if polarity > 0.05:
+        return "Positive"
+    elif polarity < -0.05:
+        return "Negative"
+    else:
+        return "Neutral"

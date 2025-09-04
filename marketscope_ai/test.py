@@ -1,29 +1,20 @@
 # =============================================
-### IMPORTING REQUIRED LIBRARIES ###
-# ============================================
-
-import yfinance as yf
-import plotly.graph_objs as go
-import plotly.express as px
+# IMPORTS
+# =============================================
 import streamlit as st
-import datetime
-import pandas as pd
 
 # Custom fetchers + components
-from fetchers.stocks import get_stock_info
-from fetchers.financials import get_financials, get_eps
-from components.charts import (
-    plot_line_price, plot_candlestick, plot_volume_histogram,
-    plot_price_with_ma, plot_ma_crossover, plot_bollinger_bands,
-    plot_rsi, plot_macd, plot_volatility, plot_drawdown
-)
-from components.helpers import _apply_dark_layout, _fmt_num
 from components.sidebar import render_sidebar
+from tabs.overview import render_overview
+from tabs.finances import render_finances
+from tabs.news import render_news
+# from tabs.llm_summary import render_llm_summary
+# from tabs.ask_ai import render_ask_ai
 
 
-# ======================================
+# =============================================
 # MAIN APP
-# ======================================
+# =============================================
 def main():
     st.set_page_config(page_title="MarketScopeAI", layout="wide")
 
@@ -88,212 +79,24 @@ def main():
             ["📊 Overview", "💰 Finances", "📰 News & Sentiment", "🧠 LLM Summary", "💬 Ask AI"]
         )
 
-        # =================================
-        # TAB 1: Overview
-        # =================================
         with tab1:
-            st.header("📊 Overview")
+            render_overview(selected_symbol, currency, interval, start_date, end_date)
 
-            if selected_symbol:
-                stock_info = get_stock_info(selected_symbol, target_currency=currency)
-
-                if "error" in stock_info:
-                    st.error(stock_info["error"])
-                else:
-                    st.subheader(f"{stock_info['ticker']} — {stock_info['name']}")
-
-                    # Price box
-                    st.markdown(
-                        f"""
-                        <div style="padding:15px; background-color:#2b8be6; border-radius:10px; 
-                                    text-align:center; color:white; font-size:20px;">
-                        <b>Current Price</b><br>
-                        {stock_info['native_currency']} {stock_info['current_price_native']} 
-                        / {currency} {stock_info[f'current_price_{currency}']}
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                    # Company details
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f"**Sector:** {stock_info['sector']}")
-                        st.markdown(f"**Industry:** {stock_info['industry']}")
-                        st.markdown(f"**Exchange:** {stock_info['exchange']}")
-                    with col2:
-                        st.markdown(f"**Market Cap:** {stock_info['market_cap']}")
-                        st.markdown(f"**Beta:** {stock_info['beta']}")
-                        st.markdown(f"**P/E Ratio:** {stock_info['pe_ratio']}")
-                        st.markdown(f"**Website:** [{stock_info['website']}]({stock_info['website']})")
-
-                    # Description
-                    st.subheader("🏢 Company Description")
-                    st.write(stock_info['description'])
-
-                    # Historical chart
-                    st.subheader("📈 Price Charts")
-                    stock = yf.Ticker(stock_info["ticker"])
-                    hist = stock.history(start=start_date, end=end_date, interval=interval)
-
-                    if not hist.empty:
-                        hist = hist.reset_index()
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=hist["Date"],
-                            y=hist["Close"],
-                            mode="lines+markers",
-                            name="Closing Price",
-                            line=dict(color="#00FFFF", width=2.5),
-                            marker=dict(size=4, color="#2b8be6"),
-                            hovertemplate="Date: %{x}<br>Price: %{y:.2f}<extra></extra>"
-                        ))
-                        _apply_dark_layout(fig, f"{stock_info['ticker']} Closing Price Over Time")
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("No historical data available for this stock.")
-
-            else:
-                st.info("Please enter a symbol and click Search.")
-
-        # ==================================
-        # TAB 2: Finances
-        # ==================================
         with tab2:
-            st.header("💰 Finance Overview")
+            render_finances(selected_symbol, start_date, end_date)
 
-            if selected_symbol:
-                try:
-                    ticker = yf.Ticker(selected_symbol)
-                    info = ticker.info
-
-                    # ===== Key Metrics =====
-                    st.subheader("📊 Key Metrics")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.markdown(
-                            f"<div class='metric-card'><b>Market Cap</b><br>${_fmt_num(info.get('marketCap'))}</div>",
-                            unsafe_allow_html=True,
-                        )
-                        st.markdown(
-                            f"<div class='metric-card'><b>P/E Ratio</b><br>{_fmt_num(info.get('forwardPE'))}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with col2:
-                        st.markdown(
-                            f"<div class='metric-card'><b>EPS (TTM)</b><br>{_fmt_num(info.get('trailingEps'))}</div>",
-                            unsafe_allow_html=True,
-                        )
-                        div_yield = info.get("dividendYield")
-                        st.markdown(
-                            f"<div class='metric-card'><b>Dividend Yield</b><br>{div_yield*100:.2f}%</div>"
-                            if isinstance(div_yield, (float, int))
-                            else "<div class='metric-card'><b>Dividend Yield</b><br>N/A</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with col3:
-                        st.markdown(
-                            f"<div class='metric-card'><b>Revenue (TTM)</b><br>${_fmt_num(info.get('totalRevenue'))}</div>",
-                            unsafe_allow_html=True,
-                        )
-                        st.markdown(
-                            f"<div class='metric-card'><b>Net Income (TTM)</b><br>${_fmt_num(info.get('netIncomeToCommon'))}</div>",
-                            unsafe_allow_html=True,
-                        )
-
-                    # ===== Revenue & Net Income Trend =====
-                    st.subheader("📈 Revenue & Net Income Trend")
-                    fin_df = get_financials(selected_symbol)
-                    if fin_df is not None:
-                        if isinstance(fin_df, dict):
-                            fin_df = pd.DataFrame(fin_df)
-                        if not fin_df.empty:
-                            fig_fin = px.bar(fin_df, x="Year", y=["Revenue", "Net Income"], barmode="group")
-                            _apply_dark_layout(fig_fin, "Annual Revenue vs Net Income")
-                            st.plotly_chart(fig_fin, use_container_width=True)
-                        else:
-                            st.warning("Financial statement data not available.")
-                    else:
-                        st.warning("Financial statement data not available.")
-
-                    # ===== EPS Trend =====
-                    st.subheader("📈 EPS Trend")
-                    eps_df = get_eps(selected_symbol)
-                    if eps_df is not None:
-                        if isinstance(eps_df, dict):
-                            eps_df = pd.DataFrame(eps_df)
-                        if not eps_df.empty:
-                            fig_eps = px.line(eps_df, x="Quarter", y="EPS", markers=True)
-                            _apply_dark_layout(fig_eps, "Quarterly EPS")
-                            st.plotly_chart(fig_eps, use_container_width=True)
-                        else:
-                            st.info("Earnings data not available.")
-                    else:
-                        st.info("Earnings data not available.")
-
-                    # ===== Technical Charts =====
-                    st.subheader("📉 Technical Charts")
-                    hist_tc = ticker.history(start=start_date, end=end_date, interval="1d")
-                    if hist_tc is None or hist_tc.empty:
-                        st.warning("No historical OHLCV available to render technical charts.")
-                    else:
-                        data = hist_tc.reset_index()
-                        chart_options = [
-                            "Line Price", "Candlestick", "Volume Histogram", "Price with Moving Averages",
-                            "MA Crossover", "Bollinger Bands", "RSI", "MACD", "Volatility", "Drawdown"
-                        ]
-                        selected_charts = st.multiselect(
-                            "Select charts to display:",
-                            chart_options,
-                            default=["Line Price", "Candlestick", "RSI"],
-                        )
-
-                        chart_map = {
-                            "Line Price": plot_line_price,
-                            "Candlestick": plot_candlestick,
-                            "Volume Histogram": plot_volume_histogram,
-                            "Price with Moving Averages": plot_price_with_ma,
-                            "MA Crossover": plot_ma_crossover,
-                            "Bollinger Bands": plot_bollinger_bands,
-                            "RSI": plot_rsi,
-                            "MACD": plot_macd,
-                            "Volatility": plot_volatility,
-                            "Drawdown": plot_drawdown,
-                        }
-
-                        for chart_name in selected_charts:
-                            fig = chart_map[chart_name](data)
-                            _apply_dark_layout(fig, chart_name)
-                            st.plotly_chart(fig, use_container_width=True)
-
-                except Exception as e:
-                    st.error(f"Error loading financials: {e}")
-            else:
-                st.info("Enter a stock symbol above to see financial data.")
-
-        # ============================
-        # TAB 3: News & Sentiment
-        # ============================
         with tab3:
-            st.header("📰 News & Sentiment")
-            st.write("🔧 Coming soon: live financial news + sentiment analysis")
+            render_news(selected_symbol)
 
-        # ============================
-        # TAB 4: LLM Summary
-        # ============================
-        with tab4:
-            st.header("🧠 LLM Summary")
-            st.write("🤖 AI-generated company summaries will appear here.")
+        # with tab4:
+        #     render_llm_summary(selected_symbol)
 
-        # ============================
-        # TAB 5: Ask AI
-        # ============================
-        with tab5:
-            st.header("💬 Ask AI")
-            query = st.text_input("Ask a question about this asset")
-            if st.button("Submit Question"):
-                st.write(f"🤖 AI Response to: {query} (placeholder)")
+        # with tab5:
+        #     render_ask_ai(selected_symbol)
 
 
+# =============================================
+# ENTRY POINT
+# =============================================
 if __name__ == "__main__":
     main()
