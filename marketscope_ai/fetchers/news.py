@@ -2,6 +2,8 @@ import os
 import requests
 from dotenv import load_dotenv
 from textblob import TextBlob
+import time
+import tqdm
 
 # Load environment variables
 load_dotenv()
