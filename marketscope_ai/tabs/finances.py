@@ -3,8 +3,7 @@ import streamlit as st
 import yfinance as yf
 import plotly.express as px
 import pandas as pd
-import time 
-import tqdm
+
 
 from fetchers.financials import get_financials, get_eps
 from components.helpers import _apply_dark_layout, _fmt_num
