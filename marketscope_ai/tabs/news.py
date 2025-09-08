@@ -1,5 +1,7 @@
 import streamlit as st
 from fetchers.news import fetch_company_news, analyze_sentiment
+import time
+import tqdm
 
 
 def render_news(symbol: str):
