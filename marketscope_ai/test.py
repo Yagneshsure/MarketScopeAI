@@ -49,22 +49,32 @@ def main():
         with col1:
             if st.button("📈 Stocks", use_container_width=True):
                 st.session_state.selected_market = "Stocks"
+                st.rerun()
         with col2:
             if st.button("💰 Crypto", use_container_width=True):
                 st.session_state.selected_market = "Crypto"
+                st.rerun()
         with col3:
             if st.button("📊 ETFs", use_container_width=True):
                 st.session_state.selected_market = "ETFs"
+                st.rerun()
 
         col4, col5 = st.columns(2)
         with col4:
             if st.button("⚒️ Commodities", use_container_width=True):
                 st.session_state.selected_market = "Commodities"
+                st.rerun()
         with col5:
             if st.button("🏦 Mutual Funds", use_container_width=True):
                 st.session_state.selected_market = "Mutual Funds"
+                st.rerun()
 
     else:
+        # Add back button
+        if st.sidebar.button("← Back to Market Selection"):
+            st.session_state.selected_market = None
+            st.rerun()
+            
         # Sidebar (modularized)
         sidebar_config = render_sidebar(st.session_state.selected_market)
 
@@ -74,25 +84,29 @@ def main():
         start_date = sidebar_config["start_date"]
         end_date = sidebar_config["end_date"]
 
-        # Tabs
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(
-            ["📊 Overview", "💰 Finances", "📰 News & Sentiment", "🧠 LLM Summary", "💬 Ask AI"]
-        )
+        # Only show tabs if a symbol is selected
+        if selected_symbol:
+            # Tabs
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(
+                ["📊 Overview", "💰 Finances", "📰 News & Sentiment", "🧠 LLM Summary", "💬 Ask AI"]
+            )
 
-        with tab1:
-            render_overview(selected_symbol, currency, interval, start_date, end_date)
+            with tab1:
+                render_overview(selected_symbol, currency, interval, start_date, end_date)
 
-        with tab2:
-            render_finances(selected_symbol, start_date, end_date)
+            with tab2:
+                render_finances(selected_symbol, start_date, end_date)
 
-        with tab3:
-            render_news(selected_symbol)
+            with tab3:
+                render_news(selected_symbol)
 
-        # with tab4:
-        #     render_llm_summary(selected_symbol)
+            # with tab4:
+            #     render_llm_summary(selected_symbol)
 
-        # with tab5:
-        #     render_ask_ai(selected_symbol)
+            # with tab5:
+            #     render_ask_ai(selected_symbol)
+        else:
+            st.info("Please select a symbol from the sidebar to view data.")
 
 
 # =============================================

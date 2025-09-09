@@ -118,25 +118,87 @@
 
 # marketscope_ai/fetchers/financials.py
 
+# fetchers/financials.py
 import yfinance as yf
 import pandas as pd
 
 
-def get_financials(symbol: str):
+def get_key_metrics(symbol: str):
     """
-    Fetch annual financials (Revenue, Net Income) for a stock symbol.
-    Returns a DataFrame with columns: ['Year', 'Revenue', 'Net Income']
+    Compute key metrics: Market Cap, P/E, EPS, Dividend Yield, Revenue, Net Income
+    Returns a dict
     """
     try:
         ticker = yf.Ticker(symbol)
-        financials = ticker.financials  # Annual financials
-        if financials is None or financials.empty:
+
+        # Market Cap = shares_outstanding * last_price
+        shares_out = ticker.get_shares_full(start="2020-01-01")
+        last_price = ticker.history(period="1d")["Close"].iloc[-1]
+        market_cap = None
+        if shares_out is not None and not shares_out.empty:
+            market_cap = shares_out.iloc[-1] * last_price
+
+        # EPS from earnings
+        eps = None
+        earnings = ticker.financials
+        if earnings is not None and not earnings.empty:
+            net_income_key = next((k for k in earnings.index if "Net Income" in k), None)
+            if net_income_key:
+                net_income = earnings.loc[net_income_key].iloc[-1]
+                eps = net_income / shares_out.iloc[-1] if shares_out is not None else None
+
+        # Revenue & Net Income
+        revenue, net_income = None, None
+        if earnings is not None and not earnings.empty:
+            rev_key = next((k for k in earnings.index if "Revenue" in k), None)
+            ni_key = next((k for k in earnings.index if "Net Income" in k), None)
+            if rev_key:
+                revenue = earnings.loc[rev_key].iloc[-1]
+            if ni_key:
+                net_income = earnings.loc[ni_key].iloc[-1]
+
+        # Dividend Yield
+        dividend_yield = None
+        if ticker.dividends is not None and not ticker.dividends.empty:
+            annual_div = ticker.dividends.groupby(ticker.dividends.index.year).sum().iloc[-1]
+            dividend_yield = annual_div / last_price
+
+        # P/E Ratio
+        pe_ratio = None
+        if eps and eps != 0:
+            pe_ratio = last_price / eps
+
+        return {
+            "marketCap": market_cap,
+            "peRatio": pe_ratio,
+            "eps": eps,
+            "dividendYield": dividend_yield,
+            "revenue": revenue,
+            "netIncome": net_income,
+        }
+    except Exception as e:
+        print(f"Error fetching key metrics for {symbol}: {e}")
+        return {}
+
+
+def get_financials(symbol: str):
+    """Annual Revenue & Net Income"""
+    try:
+        ticker = yf.Ticker(symbol)
+        fin = ticker.financials
+        if fin is None or fin.empty:
+            return None
+
+        rev_key = next((k for k in fin.index if "Revenue" in k), None)
+        ni_key = next((k for k in fin.index if "Net Income" in k), None)
+
+        if not rev_key or not ni_key:
             return None
 
         df = pd.DataFrame({
-            "Year": financials.columns.year,
-            "Revenue": financials.loc["Total Revenue"],
-            "Net Income": financials.loc["Net Income"]
+            "Year": fin.columns.year,
+            "Revenue": fin.loc[rev_key].values,
+            "Net Income": fin.loc[ni_key].values,
         }).reset_index(drop=True)
 
         return df
@@ -146,19 +208,16 @@ def get_financials(symbol: str):
 
 
 def get_eps(symbol: str):
-    """
-    Fetch quarterly EPS for a stock symbol.
-    Returns a DataFrame with columns: ['Quarter', 'EPS']
-    """
+    """Quarterly EPS"""
     try:
         ticker = yf.Ticker(symbol)
-        earnings = ticker.quarterly_earnings  # Quarterly EPS
-        if earnings is None or earnings.empty:
+        q_earnings = ticker.quarterly_earnings
+        if q_earnings is None or q_earnings.empty:
             return None
 
-        df = earnings.reset_index().rename(columns={"Earnings": "EPS"})
+        df = q_earnings.reset_index().rename(columns={"Quarter": "Quarter", "Earnings": "EPS"})
         df["Quarter"] = df["Quarter"].astype(str)
-        return df
+        return df[["Quarter", "EPS"]]
     except Exception as e:
         print(f"Error fetching EPS for {symbol}: {e}")
         return None
