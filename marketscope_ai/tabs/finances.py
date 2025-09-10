@@ -1,17 +1,25 @@
 # tabs/finances.py
 import streamlit as st
+import pandas as pd
 from fetchers.financials import (
     get_all_financial_data, 
     format_large_number, 
     format_percentage,
     validate_symbol
 )
-# from components.charts import (
-#     create_candlestick_chart,
-#     create_volume_chart, 
-#     create_revenue_income_chart,
-#     create_earnings_trend_chart
-# )
+from components.charts import (
+    create_candlestick_chart,
+    create_volume_chart, 
+    create_revenue_income_chart,
+    create_earnings_trend_chart,
+    create_combined_price_volume_chart,
+    create_price_with_moving_averages,
+    create_bollinger_bands_chart,
+    create_rsi_chart,
+    create_macd_chart,
+    create_volatility_chart,
+    prepare_chart_data
+)
 
 
 def render_finances(symbol: str, start_date=None, end_date=None):
@@ -27,24 +35,33 @@ def render_finances(symbol: str, start_date=None, end_date=None):
     # Display current symbol
     st.info(f"Analyzing: **{symbol.upper()}**")
     
-    # Validate symbol and show suggestions for common mistakes
-    validation = validate_symbol(symbol)
-    if not validation['valid']:
-        st.error(f"❌ {validation['error']}")
-        _show_symbol_suggestions(symbol)
-        return
-    
-    # Get all financial data
+    # Get all financial data (this will now handle both symbols and company names)
     with st.spinner(f"Loading financial data for {symbol}..."):
         financial_data = get_all_financial_data(symbol, start_date, end_date)
     
     if 'error' in financial_data:
         st.error(f"❌ {financial_data['error']}")
+        _show_symbol_suggestions(symbol)
         return
+    
+    # Show search resolution info if available
+    if 'search_info' in financial_data:
+        search_info = financial_data['search_info']
+        if search_info.get('resolution_method') == 'company_name_search':
+            st.success(f"✅ Found '{search_info['original_input']}' → {search_info['resolved_symbol']} ({search_info['company_name']})")
+        elif search_info.get('resolution_method') == 'direct_symbol':
+            st.info(f"✅ Using symbol: {search_info['resolved_symbol']} ({search_info['company_name']})")
+    
+    # Store symbol in financial_data for reference
+    resolved_symbol = financial_data.get('search_info', {}).get('resolved_symbol', symbol)
+    financial_data['symbol'] = resolved_symbol
     
     # Display the financial data
     _display_key_metrics(financial_data)
-    _display_charts(financial_data, symbol)
+    _display_charts(financial_data, resolved_symbol)
+    _display_technical_analysis(financial_data, resolved_symbol)
+    _display_performance_metrics(financial_data)
+    _display_price_alerts(financial_data, resolved_symbol)
     _display_financial_statements(financial_data)
     _display_company_info(financial_data)
 
@@ -73,6 +90,7 @@ def _show_symbol_suggestions(symbol: str):
         st.info("• US stocks: AAPL, MSFT, GOOGL")  
         st.info("• Hong Kong stocks: 0992.HK, 0700.HK")
         st.info("• Crypto: BTC-USD, ETH-USD")
+        st.info("• Try using company names: 'Apple', 'Microsoft', 'Tesla'")
 
 
 def _display_key_metrics(financial_data: dict):
@@ -156,123 +174,146 @@ def _display_key_metrics(financial_data: dict):
 
 
 def _display_charts(financial_data: dict, symbol: str):
-    """Display various financial charts"""
+    """Display price and volume charts"""
+    st.subheader("📈 Price Charts")
     
-    # Price Chart
-    if 'price_data' in financial_data:
-        st.subheader("📈 Price Chart")
-        price_data = financial_data['price_data']
-        
-        # Using simple plotly chart until you provide charts.py
-        import plotly.graph_objects as go
-        
-        fig = go.Figure(data=[go.Candlestick(
-            x=price_data.index,
-            open=price_data['Open'],
-            high=price_data['High'],
-            low=price_data['Low'],
-            close=price_data['Close']
-        )])
-        
-        fig.update_layout(
-            title=f'{symbol} - Price Chart',
-            xaxis_title='Date',
-            yaxis_title='Price ($)',
-            height=400,
-            xaxis_rangeslider_visible=False
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Volume Chart
-        if 'Volume' in price_data.columns:
-            fig_vol = go.Figure()
-            fig_vol.add_trace(go.Bar(
-                x=price_data.index,
-                y=price_data['Volume'],
-                name='Volume',
-                marker_color='rgba(158,202,225,0.8)'
-            ))
-            
-            fig_vol.update_layout(
-                title=f'{symbol} - Volume',
-                xaxis_title='Date',
-                yaxis_title='Volume',
-                height=250
+    if 'price_data' not in financial_data:
+        st.info("No price data available for charting.")
+        return
+    
+    price_data = prepare_chart_data(financial_data['price_data'])
+    if price_data is None:
+        st.info("Price data is not suitable for charting.")
+        return
+    
+    # Chart type selector
+    chart_type = st.selectbox(
+        "Select Chart Type:",
+        ["Combined Price & Volume", "Candlestick", "Price with Moving Averages", "Volume Only"],
+        index=0
+    )
+    
+    # Display selected chart
+    if chart_type == "Combined Price & Volume":
+        fig = create_combined_price_volume_chart(price_data, symbol)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Candlestick":
+        fig = create_candlestick_chart(price_data, symbol)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Price with Moving Averages":
+        # MA period selector
+        col1, col2 = st.columns(2)
+        with col1:
+            ma_periods = st.multiselect(
+                "Select Moving Average Periods:",
+                [5, 10, 20, 50, 100, 200],
+                default=[20, 50]
             )
-            st.plotly_chart(fig_vol, use_container_width=True)
+        
+        if ma_periods:
+            fig = create_price_with_moving_averages(price_data, symbol, windows=ma_periods)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Volume Only":
+        fig = create_volume_chart(price_data, symbol)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
     
     # Revenue and Income Trend
     if 'revenue_income_trend' in financial_data:
         st.subheader("📈 Revenue & Net Income Trend")
-        trend_data = financial_data['revenue_income_trend']
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=trend_data['Year'], 
-            y=trend_data['Revenue'], 
-            name='Revenue',
-            marker_color='lightblue'
-        ))
-        fig.add_trace(go.Bar(
-            x=trend_data['Year'], 
-            y=trend_data['Net Income'], 
-            name='Net Income',
-            marker_color='lightgreen'
-        ))
-        
-        fig.update_layout(
-            barmode='group',
-            title=f'{symbol} - Revenue vs Net Income',
-            xaxis_title='Year',
-            yaxis_title='Amount ($)',
-            height=400
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        fig = create_revenue_income_chart(financial_data['revenue_income_trend'], symbol)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
     
-    # Earnings Trend
+    # Earnings Charts
     earnings_data = financial_data.get('earnings_data', {})
     
     # Annual Earnings
     if 'annual_earnings' in earnings_data:
         st.subheader("📊 Annual Earnings Trend")
-        annual_earnings = earnings_data['annual_earnings']
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=annual_earnings.index,
-            y=annual_earnings['Earnings'],
-            name='Annual EPS',
-            marker_color='lightgreen'
-        ))
-        fig.update_layout(
-            title=f'{symbol} - Annual EPS',
-            xaxis_title='Year',
-            yaxis_title='EPS ($)',
-            height=300
+        fig = create_earnings_trend_chart(
+            earnings_data['annual_earnings'], 
+            symbol, 
+            chart_type='annual'
         )
-        st.plotly_chart(fig, use_container_width=True)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
     
     # Quarterly Earnings
     if 'quarterly_earnings' in earnings_data:
         st.subheader("📊 Quarterly Earnings Trend")
-        quarterly_earnings = earnings_data['quarterly_earnings']
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=quarterly_earnings.index,
-            y=quarterly_earnings['Earnings'],
-            mode='lines+markers',
-            name='Quarterly EPS',
-            line=dict(color='orange', width=2),
-            marker=dict(size=6)
-        ))
-        fig.update_layout(
-            title=f'{symbol} - Quarterly EPS Trend',
-            xaxis_title='Quarter',
-            yaxis_title='EPS ($)',
-            height=300
+        fig = create_earnings_trend_chart(
+            earnings_data['quarterly_earnings'], 
+            symbol, 
+            chart_type='quarterly'
         )
-        st.plotly_chart(fig, use_container_width=True)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+
+
+def _display_technical_analysis(financial_data: dict, symbol: str):
+    """Display technical analysis charts"""
+    if 'price_data' not in financial_data:
+        return
+    
+    price_data = prepare_chart_data(financial_data['price_data'])
+    if price_data is None:
+        return
+    
+    with st.expander("🔍 Technical Analysis"):
+        # Technical indicator selector
+        tech_tabs = st.tabs([
+            "Bollinger Bands", 
+            "RSI", 
+            "MACD", 
+            "Volatility"
+        ])
+        
+        with tech_tabs[0]:  # Bollinger Bands
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                bb_period = st.slider("Bollinger Bands Period:", 10, 50, 20, key="bb_period")
+            
+            fig = create_bollinger_bands_chart(price_data, symbol, window=bb_period)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with tech_tabs[1]:  # RSI
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                rsi_period = st.slider("RSI Period:", 5, 30, 14, key="rsi_period")
+            
+            fig = create_rsi_chart(price_data, symbol, period=rsi_period)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with tech_tabs[2]:  # MACD
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                macd_fast = st.slider("Fast EMA:", 5, 20, 12, key="macd_fast")
+            with col2:
+                macd_slow = st.slider("Slow EMA:", 15, 40, 26, key="macd_slow")
+            with col3:
+                macd_signal = st.slider("Signal:", 3, 15, 9, key="macd_signal")
+            
+            fig = create_macd_chart(price_data, symbol, fast=macd_fast, slow=macd_slow, signal=macd_signal)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with tech_tabs[3]:  # Volatility
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                vol_period = st.slider("Volatility Window:", 10, 50, 20, key="vol_period")
+            
+            fig = create_volatility_chart(price_data, symbol, window=vol_period)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
 
 
 def _display_financial_statements(financial_data: dict):
@@ -308,7 +349,25 @@ def _display_financial_statements(financial_data: dict):
                 if not data.empty:
                     # Show recent years data (limit to 5 years)
                     recent_data = data.iloc[:, :5] if data.shape[1] > 5 else data
-                    st.dataframe(recent_data, use_container_width=True)
+                    
+                    # Format large numbers for better readability
+                    formatted_data = recent_data.copy()
+                    for col in formatted_data.columns:
+                        if formatted_data[col].dtype in ['int64', 'float64']:
+                            formatted_data[col] = formatted_data[col].apply(
+                                lambda x: format_large_number(x) if pd.notna(x) else 'N/A'
+                            )
+                    
+                    st.dataframe(formatted_data, use_container_width=True)
+                    
+                    # Add download button for the data
+                    csv = recent_data.to_csv()
+                    st.download_button(
+                        label=f"Download {data_key.replace('_', ' ').title()} CSV",
+                        data=csv,
+                        file_name=f"{data_key}_{financial_data.get('symbol', 'unknown')}.csv",
+                        mime="text/csv"
+                    )
                 else:
                     st.info("No data available")
 
@@ -334,6 +393,13 @@ def _display_company_info(financial_data: dict):
                 st.write(f"**Country:** {basic_info['country']}")
             if basic_info.get('website'):
                 st.write(f"**Website:** {basic_info['website']}")
+            if basic_info.get('employees'):
+                employees = basic_info['employees']
+                if employees >= 1000:
+                    emp_str = f"{employees/1000:.1f}K"
+                else:
+                    emp_str = f"{employees:,}"
+                st.write(f"**Employees:** {emp_str}")
         
         with col2:
             if basic_info.get('average_volume'):
@@ -345,19 +411,180 @@ def _display_company_info(financial_data: dict):
                 else:
                     vol_str = f"{avg_vol:.0f}"
                 st.write(f"**Average Volume:** {vol_str}")
+            
+            if basic_info.get('exchange'):
+                st.write(f"**Exchange:** {basic_info['exchange']}")
+            
+            if basic_info.get('currency'):
+                st.write(f"**Currency:** {basic_info['currency']}")
+            
+            if basic_info.get('timezone'):
+                st.write(f"**Timezone:** {basic_info['timezone']}")
         
         # Business Summary
         if basic_info.get('business_summary'):
             st.write("**Business Summary:**")
-            st.write(basic_info['business_summary'][:500] + "..." if len(basic_info['business_summary']) > 500 else basic_info['business_summary'])
+            summary = basic_info['business_summary']
+            # Truncate if too long
+            if len(summary) > 500:
+                summary = summary[:500] + "..."
+            st.write(summary)
+        
+        # Key Statistics Summary
+        if any(key in basic_info for key in ['market_cap', 'pe_ratio', 'revenue_ttm']):
+            st.write("**Key Statistics:**")
+            stats_col1, stats_col2, stats_col3 = st.columns(3)
+            
+            with stats_col1:
+                if basic_info.get('profit_margin'):
+                    margin = basic_info['profit_margin']
+                    st.write(f"• Profit Margin: {margin:.2%}")
+                if basic_info.get('operating_margin'):
+                    op_margin = basic_info['operating_margin']
+                    st.write(f"• Operating Margin: {op_margin:.2%}")
+            
+            with stats_col2:
+                if basic_info.get('return_on_equity'):
+                    roe = basic_info['return_on_equity']
+                    st.write(f"• ROE: {roe:.2%}")
+                if basic_info.get('return_on_assets'):
+                    roa = basic_info['return_on_assets']
+                    st.write(f"• ROA: {roa:.2%}")
+            
+            with stats_col3:
+                if basic_info.get('enterprise_value'):
+                    ev = basic_info['enterprise_value']
+                    st.write(f"• Enterprise Value: {format_large_number(ev)}")
+                if basic_info.get('price_to_sales'):
+                    ps = basic_info['price_to_sales']
+                    st.write(f"• P/S Ratio: {ps:.2f}")
 
 
-# TODO: Remove this section once you provide charts.py
-# This is temporary - using basic plotly charts
-# Replace with your chart components once you share charts.py
-def _create_temp_chart_placeholder():
+def _display_price_alerts(financial_data: dict, symbol: str):
+    """Display price alert functionality"""
+    current_price = financial_data.get('current_price')
+    if not current_price:
+        return
+    
+    with st.expander("🔔 Price Alerts"):
+        st.write("Set price alerts for this stock:")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            alert_price = st.number_input(
+                "Alert Price ($):",
+                min_value=0.01,
+                value=float(current_price),
+                step=0.01,
+                format="%.2f"
+            )
+        
+        with col2:
+            alert_type = st.selectbox(
+                "Alert Type:",
+                ["Above", "Below"]
+            )
+        
+        if st.button("Set Alert"):
+            # This would integrate with your notification system
+            st.success(f"Alert set: Notify when {symbol} goes {alert_type.lower()} ${alert_price:.2f}")
+            st.info("Note: This is a demo. In a real application, this would integrate with a notification service.")
+
+
+def _display_performance_metrics(financial_data: dict):
+    """Display additional performance metrics"""
+    basic_info = financial_data.get('basic_info', {})
+    
+    if not basic_info:
+        return
+    
+    with st.expander("📊 Performance Metrics"):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**Profitability:**")
+            if basic_info.get('gross_margin'):
+                st.write(f"• Gross Margin: {basic_info['gross_margin']:.2%}")
+            if basic_info.get('operating_margin'):
+                st.write(f"• Operating Margin: {basic_info['operating_margin']:.2%}")
+            if basic_info.get('profit_margin'):
+                st.write(f"• Profit Margin: {basic_info['profit_margin']:.2%}")
+        
+        with col2:
+            st.write("**Efficiency:**")
+            if basic_info.get('return_on_equity'):
+                st.write(f"• ROE: {basic_info['return_on_equity']:.2%}")
+            if basic_info.get('return_on_assets'):
+                st.write(f"• ROA: {basic_info['return_on_assets']:.2%}")
+            if basic_info.get('asset_turnover'):
+                st.write(f"• Asset Turnover: {basic_info['asset_turnover']:.2f}")
+        
+        with col3:
+            st.write("**Valuation:**")
+            if basic_info.get('price_to_sales'):
+                st.write(f"• P/S Ratio: {basic_info['price_to_sales']:.2f}")
+            if basic_info.get('price_to_book'):
+                st.write(f"• P/B Ratio: {basic_info['price_to_book']:.2f}")
+            if basic_info.get('peg_ratio'):
+                st.write(f"• PEG Ratio: {basic_info['peg_ratio']:.2f}")
+
+
+# Enhanced render function with additional features
+def render_finances_enhanced(symbol: str, start_date=None, end_date=None):
     """
-    Temporary placeholder for charts until charts.py is provided
-    This will be replaced with actual chart components
+    Enhanced version of render_finances with additional features
     """
-    pass
+    st.header("💰 Enhanced Finance Overview")
+    
+    if not symbol:
+        st.warning("Please select a symbol from the sidebar.")
+        return
+    
+    # Display current symbol with last update time
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.info(f"Analyzing: **{symbol.upper()}**")
+    with col2:
+        if st.button("🔄 Refresh Data"):
+            st.rerun()
+    
+    # Get all financial data
+    with st.spinner(f"Loading financial data for {symbol}..."):
+        financial_data = get_all_financial_data(symbol, start_date, end_date)
+    
+    if 'error' in financial_data:
+        st.error(f"❌ {financial_data['error']}")
+        _show_symbol_suggestions(symbol)
+        return
+    
+    # Show search resolution info if available
+    if 'search_info' in financial_data:
+        search_info = financial_data['search_info']
+        if search_info.get('resolution_method') == 'company_name_search':
+            st.success(f"✅ Found '{search_info['original_input']}' → {search_info['resolved_symbol']} ({search_info['company_name']})")
+        elif search_info.get('resolution_method') == 'direct_symbol':
+            st.info(f"✅ Using symbol: {search_info['resolved_symbol']} ({search_info['company_name']})")
+    
+    # Store symbol in financial_data for reference
+    resolved_symbol = financial_data.get('search_info', {}).get('resolved_symbol', symbol)
+    financial_data['symbol'] = resolved_symbol
+    
+    # Display all sections
+    _display_key_metrics(financial_data)
+    _display_charts(financial_data, resolved_symbol)
+    _display_technical_analysis(financial_data, resolved_symbol)
+    _display_performance_metrics(financial_data)
+    _display_price_alerts(financial_data, resolved_symbol)
+    _display_financial_statements(financial_data)
+    _display_company_info(financial_data)
+    
+    # Footer with data source info
+    st.markdown("---")
+    st.caption("💡 Data is for educational purposes only. Not financial advice.")
+    if financial_data.get('data_source'):
+        st.caption(f"Data source: {financial_data['data_source']}")
+
+
+# Export the main functions
+__all__ = ['render_finances', 'render_finances_enhanced']
