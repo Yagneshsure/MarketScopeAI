@@ -1,351 +1,363 @@
+# tabs/finances.py
 import streamlit as st
-import yfinance as yf
-import plotly.graph_objects as go
-import pandas as pd
-import requests
-import json
-from datetime import datetime, timedelta
+from fetchers.financials import (
+    get_all_financial_data, 
+    format_large_number, 
+    format_percentage,
+    validate_symbol
+)
+# from components.charts import (
+#     create_candlestick_chart,
+#     create_volume_chart, 
+#     create_revenue_income_chart,
+#     create_earnings_trend_chart
+# )
+
 
 def render_finances(symbol: str, start_date=None, end_date=None):
+    """
+    Main function to render the finances tab
+    """
     st.header("💰 Finance Overview")
     
     if not symbol:
         st.warning("Please select a symbol from the sidebar.")
         return
     
+    # Display current symbol
     st.info(f"Analyzing: **{symbol.upper()}**")
     
-    # Try multiple methods
-    methods = [
-        ("Method 1: Enhanced yfinance", fetch_with_enhanced_yfinance),
-        ("Method 2: Multiple yfinance calls", fetch_with_multiple_calls),
-        ("Method 3: Raw yfinance data", fetch_with_raw_data),
-        ("Method 4: Alternative data sources", fetch_with_alternatives)
-    ]
+    # Validate symbol and show suggestions for common mistakes
+    validation = validate_symbol(symbol)
+    if not validation['valid']:
+        st.error(f"❌ {validation['error']}")
+        _show_symbol_suggestions(symbol)
+        return
     
-    for method_name, method_func in methods:
-        try:
-            st.subheader(f"🔄 Trying {method_name}")
-            result = method_func(symbol, start_date, end_date)
-            if result and result.get('success'):
-                st.success(f"✅ {method_name} worked!")
-                display_financial_data(result['data'], symbol)
-                return
-            else:
-                st.warning(f"⚠️ {method_name} failed: {result.get('error', 'Unknown error')}")
-        except Exception as e:
-            st.error(f"❌ {method_name} error: {str(e)}")
+    # Get all financial data
+    with st.spinner(f"Loading financial data for {symbol}..."):
+        financial_data = get_all_financial_data(symbol, start_date, end_date)
     
-    st.error("All methods failed. The symbol might not exist or have limited data.")
-
-
-def fetch_with_enhanced_yfinance(symbol: str, start_date=None, end_date=None):
-    """Method 1: Enhanced yfinance with multiple fallbacks"""
-    try:
-        ticker = yf.Ticker(symbol)
-        
-        # Test basic connectivity
-        hist = ticker.history(period="1d")
-        if hist.empty:
-            return {'success': False, 'error': 'No price data available'}
-        
-        data = {'price_data': hist}
-        
-        # Try different info methods
-        info_methods = [
-            ('info', lambda: ticker.info),
-            ('fast_info', lambda: ticker.fast_info),
-            ('get_info', lambda: ticker.get_info()),
-        ]
-        
-        for method_name, method in info_methods:
-            try:
-                info_data = method()
-                if info_data:
-                    data[f'{method_name}_data'] = info_data
-                    break
-            except:
-                continue
-        
-        # Try financial statements
-        financial_methods = [
-            ('financials', lambda: ticker.financials),
-            ('quarterly_financials', lambda: ticker.quarterly_financials),
-            ('income_stmt', lambda: ticker.income_stmt),
-            ('quarterly_income_stmt', lambda: ticker.quarterly_income_stmt)
-        ]
-        
-        for method_name, method in financial_methods:
-            try:
-                fin_data = method()
-                if fin_data is not None and not fin_data.empty:
-                    data[f'{method_name}_data'] = fin_data
-            except:
-                continue
-        
-        # Try earnings data
-        try:
-            earnings = ticker.earnings
-            if earnings is not None and not earnings.empty:
-                data['earnings_data'] = earnings
-        except:
-            pass
-            
-        try:
-            quarterly_earnings = ticker.quarterly_earnings
-            if quarterly_earnings is not None and not quarterly_earnings.empty:
-                data['quarterly_earnings_data'] = quarterly_earnings
-        except:
-            pass
-        
-        return {'success': True, 'data': data}
-        
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-
-
-def fetch_with_multiple_calls(symbol: str, start_date=None, end_date=None):
-    """Method 2: Multiple separate yfinance calls"""
-    try:
-        data = {}
-        
-        # Basic price data
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="1y")
-        if hist.empty:
-            return {'success': False, 'error': 'No historical data'}
-        data['price_data'] = hist
-        
-        # Manual calculation of key metrics
-        current_price = hist['Close'].iloc[-1]
-        
-        # Try to get shares outstanding
-        try:
-            shares = ticker.get_shares_full(start="2020-01-01", end=None)
-            if shares is not None and not shares.empty:
-                shares_outstanding = shares.iloc[-1]
-                data['market_cap'] = current_price * shares_outstanding
-        except:
-            pass
-        
-        # Calculate simple metrics
-        data['current_price'] = current_price
-        data['price_change'] = hist['Close'].iloc[-1] - hist['Close'].iloc[-2] if len(hist) > 1 else 0
-        data['volume'] = hist['Volume'].iloc[-1] if 'Volume' in hist.columns else None
-        
-        # Try dividends
-        try:
-            dividends = ticker.dividends
-            if dividends is not None and not dividends.empty:
-                annual_dividend = dividends.groupby(dividends.index.year).sum().iloc[-1] if len(dividends) > 0 else 0
-                data['dividend_yield'] = (annual_dividend / current_price) * 100 if current_price > 0 else 0
-        except:
-            pass
-        
-        return {'success': True, 'data': data}
-        
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-
-
-def fetch_with_raw_data(symbol: str, start_date=None, end_date=None):
-    """Method 3: Raw yfinance data extraction"""
-    try:
-        ticker = yf.Ticker(symbol)
-        data = {}
-        
-        # Get all available data
-        attributes = ['info', 'history', 'financials', 'balance_sheet', 'cashflow', 
-                     'earnings', 'quarterly_earnings', 'dividends', 'splits']
-        
-        for attr in attributes:
-            try:
-                if attr == 'history':
-                    value = ticker.history(period="1y")
-                else:
-                    value = getattr(ticker, attr, None)
-                
-                if value is not None:
-                    if hasattr(value, 'empty') and not value.empty:
-                        data[attr] = value
-                    elif isinstance(value, dict) and value:
-                        data[attr] = value
-                    elif not hasattr(value, 'empty'):
-                        data[attr] = value
-            except:
-                continue
-        
-        if not data:
-            return {'success': False, 'error': 'No data attributes found'}
-        
-        return {'success': True, 'data': data}
-        
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-
-
-def fetch_with_alternatives(symbol: str, start_date=None, end_date=None):
-    """Method 4: Alternative approaches"""
-    try:
-        data = {}
-        
-        # Try different period formats
-        periods = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y']
-        ticker = yf.Ticker(symbol)
-        
-        for period in periods:
-            try:
-                hist = ticker.history(period=period)
-                if not hist.empty:
-                    data['price_data'] = hist
-                    data['period_used'] = period
-                    break
-            except:
-                continue
-        
-        if 'price_data' not in data:
-            return {'success': False, 'error': 'No price data available for any period'}
-        
-        # Try to download with different parameters
-        try:
-            # Alternative download method
-            alt_data = yf.download(symbol, period="6mo", group_by='ticker', 
-                                 auto_adjust=True, prepost=True, threads=True)
-            if not alt_data.empty:
-                data['alternative_price_data'] = alt_data
-        except:
-            pass
-        
-        return {'success': True, 'data': data}
-        
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-
-
-def display_financial_data(data, symbol):
-    """Display the financial data that was successfully fetched"""
+    if 'error' in financial_data:
+        st.error(f"❌ {financial_data['error']}")
+        return
     
-    # Display Key Metrics
-    st.subheader("📊 Available Data")
+    # Display the financial data
+    _display_key_metrics(financial_data)
+    _display_charts(financial_data, symbol)
+    _display_financial_statements(financial_data)
+    _display_company_info(financial_data)
+
+
+def _show_symbol_suggestions(symbol: str):
+    """Show suggestions for common symbol mistakes"""
+    symbol_suggestions = {
+        'lenovo': ['0992.HK', 'LNVGY'],
+        'apple': ['AAPL'],
+        'microsoft': ['MSFT'],
+        'google': ['GOOGL', 'GOOG'],
+        'tesla': ['TSLA'],
+        'amazon': ['AMZN'],
+        'meta': ['META'],
+        'netflix': ['NFLX'],
+        'nvidia': ['NVDA'],
+        'disney': ['DIS']
+    }
     
-    col1, col2, col3 = st.columns(3)
+    if symbol.lower() in symbol_suggestions:
+        st.warning(f"⚠️ '{symbol}' is not a valid ticker symbol. Try these instead:")
+        for suggested_symbol in symbol_suggestions[symbol.lower()]:
+            st.code(suggested_symbol)
+    else:
+        st.info("💡 **Common ticker formats:**")
+        st.info("• US stocks: AAPL, MSFT, GOOGL")  
+        st.info("• Hong Kong stocks: 0992.HK, 0700.HK")
+        st.info("• Crypto: BTC-USD, ETH-USD")
+
+
+def _display_key_metrics(financial_data: dict):
+    """Display key financial metrics"""
+    st.subheader("📊 Key Metrics")
     
-    # Price data
-    if 'price_data' in data:
-        hist = data['price_data']
-        current_price = hist['Close'].iloc[-1]
-        price_change = hist['Close'].iloc[-1] - hist['Close'].iloc[-2] if len(hist) > 1 else 0
+    basic_info = financial_data.get('basic_info', {})
+    current_price = financial_data.get('current_price')
+    price_change = financial_data.get('price_change', 0)
+    
+    # Create metrics columns
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if current_price:
+            st.metric(
+                "Current Price", 
+                f"${current_price:.2f}", 
+                f"${price_change:.2f}"
+            )
+        
+        # Market Cap
+        market_cap = basic_info.get('market_cap')
+        st.metric("Market Cap", format_large_number(market_cap))
+    
+    with col2:
+        # P/E Ratio
+        pe_ratio = basic_info.get('pe_ratio')
+        pe_display = f"{pe_ratio:.2f}" if pe_ratio else "N/A"
+        st.metric("P/E Ratio", pe_display)
+        
+        # EPS
+        eps = basic_info.get('eps')
+        eps_display = f"${eps:.2f}" if eps else "N/A"
+        st.metric("EPS (TTM)", eps_display)
+    
+    with col3:
+        # Revenue TTM
+        revenue_ttm = basic_info.get('revenue_ttm')
+        st.metric("Revenue (TTM)", format_large_number(revenue_ttm))
+        
+        # Dividend Yield
+        dividend_yield = basic_info.get('dividend_yield')
+        div_display = f"{dividend_yield:.2%}" if dividend_yield else "N/A"
+        st.metric("Dividend Yield", div_display)
+    
+    with col4:
+        # Net Income TTM
+        net_income = basic_info.get('net_income_ttm')
+        st.metric("Net Income (TTM)", format_large_number(net_income))
+        
+        # Beta
+        beta = basic_info.get('beta')
+        beta_display = f"{beta:.2f}" if beta else "N/A"
+        st.metric("Beta", beta_display)
+    
+    # Additional metrics in expandable section
+    with st.expander("📈 Additional Metrics"):
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.metric("Current Price", f"${current_price:.2f}", f"${price_change:.2f}")
-            if 'Volume' in hist.columns:
-                st.metric("Volume", f"{hist['Volume'].iloc[-1]:,.0f}")
-    
-    # Market cap from different sources
-    market_cap = None
-    if 'market_cap' in data:
-        market_cap = data['market_cap']
-    elif 'info_data' in data and isinstance(data['info_data'], dict):
-        market_cap = data['info_data'].get('marketCap')
-    elif 'fast_info_data' in data:
-        market_cap = getattr(data['fast_info_data'], 'market_cap', None)
-    
-    if market_cap:
+            book_value = basic_info.get('book_value')
+            st.metric("Book Value", f"${book_value:.2f}" if book_value else "N/A")
+            
+            current_ratio = basic_info.get('current_ratio')
+            st.metric("Current Ratio", f"{current_ratio:.2f}" if current_ratio else "N/A")
+        
         with col2:
-            if market_cap >= 1e12:
-                cap_str = f"${market_cap/1e12:.2f}T"
-            elif market_cap >= 1e9:
-                cap_str = f"${market_cap/1e9:.2f}B"
-            else:
-                cap_str = f"${market_cap/1e6:.2f}M"
-            st.metric("Market Cap", cap_str)
-    
-    # Dividend yield
-    dividend_yield = data.get('dividend_yield')
-    if dividend_yield:
+            price_to_book = basic_info.get('price_to_book')
+            st.metric("Price to Book", f"{price_to_book:.2f}" if price_to_book else "N/A")
+            
+            debt_to_equity = basic_info.get('debt_to_equity')
+            st.metric("Debt to Equity", f"{debt_to_equity:.2f}" if debt_to_equity else "N/A")
+        
         with col3:
-            st.metric("Dividend Yield", f"{dividend_yield:.2f}%")
+            high_52w = basic_info.get('fifty_two_week_high')
+            st.metric("52W High", f"${high_52w:.2f}" if high_52w else "N/A")
+            
+            low_52w = basic_info.get('fifty_two_week_low')
+            st.metric("52W Low", f"${low_52w:.2f}" if low_52w else "N/A")
+
+
+def _display_charts(financial_data: dict, symbol: str):
+    """Display various financial charts"""
     
     # Price Chart
-    if 'price_data' in data:
+    if 'price_data' in financial_data:
         st.subheader("📈 Price Chart")
-        hist = data['price_data']
+        price_data = financial_data['price_data']
         
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(
-            x=hist.index,
-            open=hist['Open'],
-            high=hist['High'],
-            low=hist['Low'],
-            close=hist['Close'],
-            name=symbol
-        ))
+        # Using simple plotly chart until you provide charts.py
+        import plotly.graph_objects as go
+        
+        fig = go.Figure(data=[go.Candlestick(
+            x=price_data.index,
+            open=price_data['Open'],
+            high=price_data['High'],
+            low=price_data['Low'],
+            close=price_data['Close']
+        )])
         
         fig.update_layout(
-            title=f'{symbol} - Price Chart ({data.get("period_used", "Recent")})',
+            title=f'{symbol} - Price Chart',
             xaxis_title='Date',
             yaxis_title='Price ($)',
-            height=500,
+            height=400,
             xaxis_rangeslider_visible=False
         )
         st.plotly_chart(fig, use_container_width=True)
-    
-    # Financial statements if available
-    financial_keys = ['financials_data', 'quarterly_financials_data', 'income_stmt_data']
-    for key in financial_keys:
-        if key in data:
-            st.subheader(f"📋 {key.replace('_', ' ').title()}")
-            fin_data = data[key]
+        
+        # Volume Chart
+        if 'Volume' in price_data.columns:
+            fig_vol = go.Figure()
+            fig_vol.add_trace(go.Bar(
+                x=price_data.index,
+                y=price_data['Volume'],
+                name='Volume',
+                marker_color='rgba(158,202,225,0.8)'
+            ))
             
-            if not fin_data.empty:
-                # Look for revenue and net income
-                revenue_rows = [idx for idx in fin_data.index if 'revenue' in str(idx).lower()]
-                income_rows = [idx for idx in fin_data.index if 'net income' in str(idx).lower()]
-                
-                if revenue_rows:
-                    st.write("**Revenue:**")
-                    st.dataframe(fin_data.loc[revenue_rows].head())
-                    
-                if income_rows:
-                    st.write("**Net Income:**")
-                    st.dataframe(fin_data.loc[income_rows].head())
-            break
+            fig_vol.update_layout(
+                title=f'{symbol} - Volume',
+                xaxis_title='Date',
+                yaxis_title='Volume',
+                height=250
+            )
+            st.plotly_chart(fig_vol, use_container_width=True)
     
-    # Earnings data
-    if 'earnings_data' in data:
-        st.subheader("📊 Annual Earnings")
-        earnings = data['earnings_data']
-        if not earnings.empty:
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=earnings.index,
-                y=earnings['Earnings'],
-                name='EPS'
-            ))
-            fig.update_layout(title=f'{symbol} - Annual EPS')
-            st.plotly_chart(fig, use_container_width=True)
+    # Revenue and Income Trend
+    if 'revenue_income_trend' in financial_data:
+        st.subheader("📈 Revenue & Net Income Trend")
+        trend_data = financial_data['revenue_income_trend']
+        
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=trend_data['Year'], 
+            y=trend_data['Revenue'], 
+            name='Revenue',
+            marker_color='lightblue'
+        ))
+        fig.add_trace(go.Bar(
+            x=trend_data['Year'], 
+            y=trend_data['Net Income'], 
+            name='Net Income',
+            marker_color='lightgreen'
+        ))
+        
+        fig.update_layout(
+            barmode='group',
+            title=f'{symbol} - Revenue vs Net Income',
+            xaxis_title='Year',
+            yaxis_title='Amount ($)',
+            height=400
+        )
+        st.plotly_chart(fig, use_container_width=True)
     
-    if 'quarterly_earnings_data' in data:
-        st.subheader("📊 Quarterly Earnings")
-        q_earnings = data['quarterly_earnings_data']
-        if not q_earnings.empty:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=q_earnings.index,
-                y=q_earnings['Earnings'],
-                mode='lines+markers',
-                name='Quarterly EPS'
-            ))
-            fig.update_layout(title=f'{symbol} - Quarterly EPS Trend')
-            st.plotly_chart(fig, use_container_width=True)
+    # Earnings Trend
+    earnings_data = financial_data.get('earnings_data', {})
     
-    # Debug info
-    with st.expander("🔍 Debug: Available Data Keys"):
-        st.write("Data sources found:")
-        for key, value in data.items():
-            if hasattr(value, 'shape'):
-                st.write(f"- {key}: DataFrame with shape {value.shape}")
-            elif isinstance(value, dict):
-                st.write(f"- {key}: Dictionary with {len(value)} keys")
-            else:
-                st.write(f"- {key}: {type(value).__name__}")
+    # Annual Earnings
+    if 'annual_earnings' in earnings_data:
+        st.subheader("📊 Annual Earnings Trend")
+        annual_earnings = earnings_data['annual_earnings']
+        
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=annual_earnings.index,
+            y=annual_earnings['Earnings'],
+            name='Annual EPS',
+            marker_color='lightgreen'
+        ))
+        fig.update_layout(
+            title=f'{symbol} - Annual EPS',
+            xaxis_title='Year',
+            yaxis_title='EPS ($)',
+            height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Quarterly Earnings
+    if 'quarterly_earnings' in earnings_data:
+        st.subheader("📊 Quarterly Earnings Trend")
+        quarterly_earnings = earnings_data['quarterly_earnings']
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=quarterly_earnings.index,
+            y=quarterly_earnings['Earnings'],
+            mode='lines+markers',
+            name='Quarterly EPS',
+            line=dict(color='orange', width=2),
+            marker=dict(size=6)
+        ))
+        fig.update_layout(
+            title=f'{symbol} - Quarterly EPS Trend',
+            xaxis_title='Quarter',
+            yaxis_title='EPS ($)',
+            height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def _display_financial_statements(financial_data: dict):
+    """Display financial statements data"""
+    financial_statements = financial_data.get('financial_statements', {})
+    
+    if not financial_statements:
+        return
+    
+    st.subheader("📋 Financial Statements")
+    
+    # Create tabs for different financial statements
+    tabs = []
+    tab_data = []
+    
+    if 'annual_financials' in financial_statements:
+        tabs.append("📊 Income Statement")
+        tab_data.append(('annual_financials', financial_statements['annual_financials']))
+    
+    if 'balance_sheet' in financial_statements:
+        tabs.append("⚖️ Balance Sheet") 
+        tab_data.append(('balance_sheet', financial_statements['balance_sheet']))
+    
+    if 'cashflow' in financial_statements:
+        tabs.append("💰 Cash Flow")
+        tab_data.append(('cashflow', financial_statements['cashflow']))
+    
+    if tabs:
+        financial_tabs = st.tabs(tabs)
+        
+        for i, (tab_name, (data_key, data)) in enumerate(zip(financial_tabs, tab_data)):
+            with tab_name:
+                if not data.empty:
+                    # Show recent years data (limit to 5 years)
+                    recent_data = data.iloc[:, :5] if data.shape[1] > 5 else data
+                    st.dataframe(recent_data, use_container_width=True)
+                else:
+                    st.info("No data available")
+
+
+def _display_company_info(financial_data: dict):
+    """Display company information"""
+    basic_info = financial_data.get('basic_info', {})
+    
+    if not basic_info:
+        return
+    
+    with st.expander("🏢 Company Information"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if basic_info.get('company_name'):
+                st.write(f"**Company:** {basic_info['company_name']}")
+            if basic_info.get('sector'):
+                st.write(f"**Sector:** {basic_info['sector']}")
+            if basic_info.get('industry'):
+                st.write(f"**Industry:** {basic_info['industry']}")
+            if basic_info.get('country'):
+                st.write(f"**Country:** {basic_info['country']}")
+            if basic_info.get('website'):
+                st.write(f"**Website:** {basic_info['website']}")
+        
+        with col2:
+            if basic_info.get('average_volume'):
+                avg_vol = basic_info['average_volume']
+                if avg_vol >= 1e6:
+                    vol_str = f"{avg_vol/1e6:.1f}M"
+                elif avg_vol >= 1e3:
+                    vol_str = f"{avg_vol/1e3:.1f}K"
+                else:
+                    vol_str = f"{avg_vol:.0f}"
+                st.write(f"**Average Volume:** {vol_str}")
+        
+        # Business Summary
+        if basic_info.get('business_summary'):
+            st.write("**Business Summary:**")
+            st.write(basic_info['business_summary'][:500] + "..." if len(basic_info['business_summary']) > 500 else basic_info['business_summary'])
+
+
+# TODO: Remove this section once you provide charts.py
+# This is temporary - using basic plotly charts
+# Replace with your chart components once you share charts.py
+def _create_temp_chart_placeholder():
+    """
+    Temporary placeholder for charts until charts.py is provided
+    This will be replaced with actual chart components
+    """
+    pass
