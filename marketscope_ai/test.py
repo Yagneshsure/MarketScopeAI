@@ -7,7 +7,7 @@ import streamlit as st
 from components.sidebar import render_sidebar
 from tabs.overview import render_overview
 from tabs.finances import render_finances
-from tabs.news import render_news
+from tabs.news import render_news_sentiment
 # from tabs.llm_summary import render_llm_summary
 # from tabs.ask_ai import render_ask_ai
 
@@ -98,7 +98,7 @@ def main():
                 render_finances(selected_symbol, start_date, end_date)
 
             with tab3:
-                render_news(selected_symbol)
+                render_news_sentiment(selected_symbol)
 
             # with tab4:
             #     render_llm_summary(selected_symbol)
