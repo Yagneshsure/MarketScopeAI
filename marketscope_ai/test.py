@@ -8,7 +8,7 @@ from components.sidebar import render_sidebar
 from tabs.overview import render_overview
 from tabs.finances import render_finances
 from tabs.news import render_news_sentiment
-# from tabs.llm_summary import render_llm_summary
+from tabs.llm_summary import render_llm_summary
 # from tabs.ask_ai import render_ask_ai
 
 
@@ -100,8 +100,8 @@ def main():
             with tab3:
                 render_news_sentiment(selected_symbol)
 
-            # with tab4:
-            #     render_llm_summary(selected_symbol)
+            with tab4:
+                render_llm_summary(selected_symbol)
 
             # with tab5:
             #     render_ask_ai(selected_symbol)
