@@ -18,6 +18,9 @@ def create_candlestick_chart(price_data, symbol: str, height: int = 400):
     Returns:
         Plotly figure object
     """
+    if price_data is None or price_data.empty:
+        return None
+        
     fig = go.Figure(data=[go.Candlestick(
         x=price_data.index,
         open=price_data['Open'],
@@ -52,7 +55,7 @@ def create_volume_chart(price_data, symbol: str, height: int = 250):
     Returns:
         Plotly figure object
     """
-    if 'Volume' not in price_data.columns:
+    if price_data is None or price_data.empty or 'Volume' not in price_data.columns:
         return None
     
     # Color bars based on price direction
@@ -93,6 +96,9 @@ def create_price_with_moving_averages(price_data, symbol: str, windows=[20, 50],
     Returns:
         Plotly figure object
     """
+    if price_data is None or price_data.empty or 'Close' not in price_data.columns:
+        return None
+        
     fig = go.Figure()
     
     # Add close price
@@ -133,14 +139,20 @@ def create_revenue_income_chart(trend_data, symbol: str, height: int = 400):
     Create a bar chart showing revenue vs net income trend
     
     Args:
-        trend_data: Dict with 'Year', 'Revenue', 'Net Income' keys
+        trend_data: DataFrame with 'Year', 'Revenue', 'Net Income' columns
         symbol: Stock symbol for title
         height: Chart height in pixels
     
     Returns:
         Plotly figure object
     """
-    if not trend_data or 'Year' not in trend_data:
+    # FIXED: Proper DataFrame validation - this was the line causing the error
+    if trend_data is None or trend_data.empty or 'Year' not in trend_data.columns:
+        return None
+    
+    # Ensure we have the required columns
+    required_columns = ['Year', 'Revenue', 'Net Income']
+    if not all(col in trend_data.columns for col in required_columns):
         return None
     
     fig = go.Figure()
@@ -192,6 +204,10 @@ def create_earnings_trend_chart(earnings_data, symbol: str, chart_type='annual',
     if earnings_data is None or earnings_data.empty:
         return None
     
+    # Check if 'Earnings' column exists
+    if 'Earnings' not in earnings_data.columns:
+        return None
+    
     fig = go.Figure()
     
     if chart_type == 'annual':
@@ -241,6 +257,9 @@ def create_bollinger_bands_chart(price_data, symbol: str, window=20, height: int
     Returns:
         Plotly figure object
     """
+    if price_data is None or price_data.empty or 'Close' not in price_data.columns:
+        return None
+        
     # Calculate Bollinger Bands
     sma = price_data['Close'].rolling(window=window).mean()
     std = price_data['Close'].rolling(window=window).std()
@@ -312,6 +331,9 @@ def create_rsi_chart(price_data, symbol: str, period=14, height: int = 250):
     Returns:
         Plotly figure object
     """
+    if price_data is None or price_data.empty or 'Close' not in price_data.columns:
+        return None
+        
     # Calculate RSI
     delta = price_data['Close'].diff()
     gain = delta.clip(lower=0)
@@ -365,6 +387,9 @@ def create_macd_chart(price_data, symbol: str, fast=12, slow=26, signal=9, heigh
     Returns:
         Plotly figure object
     """
+    if price_data is None or price_data.empty or 'Close' not in price_data.columns:
+        return None
+        
     # Calculate MACD
     exp1 = price_data['Close'].ewm(span=fast).mean()
     exp2 = price_data['Close'].ewm(span=slow).mean()
@@ -432,6 +457,9 @@ def create_volatility_chart(price_data, symbol: str, window=20, height: int = 30
     Returns:
         Plotly figure object
     """
+    if price_data is None or price_data.empty or 'Close' not in price_data.columns:
+        return None
+        
     # Calculate returns and rolling volatility
     returns = price_data['Close'].pct_change()
     rolling_vol = returns.rolling(window=window).std() * np.sqrt(252)  # Annualized
@@ -471,6 +499,9 @@ def create_combined_price_volume_chart(price_data, symbol: str, height: int = 60
     Returns:
         Plotly figure object
     """
+    if price_data is None or price_data.empty:
+        return None
+        
     # Create subplots
     fig = make_subplots(
         rows=2, cols=1,
@@ -490,7 +521,7 @@ def create_combined_price_volume_chart(price_data, symbol: str, height: int = 60
         name="Price"
     ), row=1, col=1)
     
-    # Add volume bars
+    # Add volume bars (if available)
     if 'Volume' in price_data.columns:
         colors = ['green' if close >= open_price else 'red' 
                   for close, open_price in zip(price_data['Close'], price_data['Open'])]
@@ -514,7 +545,6 @@ def create_combined_price_volume_chart(price_data, symbol: str, height: int = 60
     return fig
 
 
-# Utility function to format chart data
 def prepare_chart_data(price_data):
     """
     Prepare and validate data for charting
@@ -536,8 +566,14 @@ def prepare_chart_data(price_data):
     # Remove any rows with NaN values in OHLC data
     price_data = price_data.dropna(subset=required_columns)
     
+    if price_data.empty:
+        return None
+    
     # Ensure index is datetime
     if not isinstance(price_data.index, pd.DatetimeIndex):
-        price_data.index = pd.to_datetime(price_data.index)
+        try:
+            price_data.index = pd.to_datetime(price_data.index)
+        except:
+            return None
     
     return price_data
