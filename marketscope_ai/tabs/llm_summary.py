@@ -22,6 +22,7 @@ def render_llm_summary(company_info=None, finance_info=None, technical_info=None
         st.warning("⚠️ No company description found to summarize.")
 
     # Summarize Financials
+    ## 
     st.subheader("💰 Financial Insights")
     if finance_info:
         summary = generate_summary(f"Summarize these financial metrics:\n\n{finance_info}", provider)
