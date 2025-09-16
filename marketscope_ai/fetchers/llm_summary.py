@@ -1,69 +1,57 @@
-# fetchers/llm_fetchers.py
+# fetchers/llm_summary.py
 
 import os
 import requests
+from dotenv import load_dotenv
 
-# Load API keys from environment
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+# Load environment variables
+load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# -------------------------
-# LLM API Call Functions
-# -------------------------
+BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-def call_groq(prompt: str):
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": "llama-3.1-8b-instant",
-        "messages": [{"role": "user", "content": prompt}],
+
+def generate_llm_summary(company_name, description, financials, news, summary_style, model="openai/gpt-4o-mini"):
+    """
+    Generate an AI-powered summary for a company using OpenRouter API.
+    """
+
+    if not OPENROUTER_API_KEY:
+        raise ValueError("⚠️ Missing OpenRouter API key. Please check your .env file.")
+
+    # Build prompt
+    prompt = f"""
+    You are a financial analyst AI.
+    
+    Company: {company_name}
+
+    --- Company Overview ---
+    {description}
+
+    --- Financial Highlights ---
+    {financials}
+
+    --- Recent News ---
+    {news}
+
+    Task: Provide a {summary_style} of this company. 
+    Keep it clear, concise, and structured.
+    """
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
     }
-    response = requests.post(url, headers=headers, json=payload)
-    return response.json()["choices"][0]["message"]["content"].strip()
 
-
-def call_huggingface(prompt: str):
-    url = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-    headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
-    payload = {"inputs": prompt, "parameters": {"max_length": 300}}
-    response = requests.post(url, headers=headers, json=payload)
-    return response.json()[0]["summary_text"]
-
-
-def call_openrouter(prompt: str):
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
     payload = {
-        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 500,
     }
-    response = requests.post(url, headers=headers, json=payload)
-    return response.json()["choices"][0]["message"]["content"].strip()
 
+    response = requests.post(BASE_URL, headers=headers, json=payload)
+    response.raise_for_status()
 
-def call_openai(prompt: str):
-    from openai import OpenAI
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content.strip()
-
-
-def generate_summary(prompt: str, provider: str):
-    try:
-        if provider == "Groq":
-            return call_groq(prompt)
-        elif provider == "HuggingFace":
-            return call_huggingface(prompt)
-        elif provider == "OpenRouter":
-            return call_openrouter(prompt)
-        elif provider == "OpenAI":
-            return call_openai(prompt)
-        else:
-            return "⚠️ Unsupported LLM provider selected."
-    except Exception as e:
-        return f"⚠️ Error generating summary: {e}"
+    result = response.json()
+    return result["choices"][0]["message"]["content"]

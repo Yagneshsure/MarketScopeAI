@@ -1,51 +1,87 @@
-# tabs/llm.py
+# tabs/llm_summary.py
 
 import streamlit as st
-from fetchers.llm_summary import generate_summary
+from fetchers.stocks import get_stock_info
+from fetchers.financials import get_all_financial_data
+from fetchers.news import fetch_news, analyze_sentiment
+from fetchers.llm_summary import generate_llm_summary
 
-# -------------------------
-# Streamlit LLM Tab
-# -------------------------
 
-def render_llm_summary(company_info=None, finance_info=None, technical_info=None):
-    st.header("🧠 AI-Powered Stock Summary")
+def render_llm_summary(symbol: str):
+    """Render the LLM-based summary tab for a given stock/asset symbol."""
+    st.subheader("🧠 LLM-Generated Summary")
 
-    # Select Provider
-    provider = st.selectbox("Choose LLM Provider", ["Groq", "HuggingFace", "OpenRouter", "OpenAI"], index=0)
+    # --- User controls ---
+    col1, col2 = st.columns(2)
 
-    # Summarize Company Description
-    st.subheader("📜 Company & Market Overview")
-    if company_info:
-        summary = generate_summary(f"Summarize the following company profile:\n\n{company_info}", provider)
-        st.info(summary)
-    else:
-        st.warning("⚠️ No company description found to summarize.")
+    with col1:
+        summary_style = st.selectbox(
+            "Choose summary style",
+            ["Executive Summary", "Analyst-style Summary", "Investor Brief"],
+            index=0
+        )
 
-    # Summarize Financials
-    ## 
-    st.subheader("💰 Financial Insights")
-    if finance_info:
-        summary = generate_summary(f"Summarize these financial metrics:\n\n{finance_info}", provider)
-        st.success(summary)
-    else:
-        st.warning("⚠️ No financial data available.")
+    with col2:
+        model_choice = st.selectbox(
+            "Choose AI model (via OpenRouter)",
+            [
+                "openai/gpt-4o-mini",
+                "anthropic/claude-3.5-sonnet",
+                "meta-llama/llama-3.1-8b-instruct",
+                "mistralai/mistral-7b-instruct"
+            ],
+            index=0
+        )
 
-    # Summarize Technicals
-    st.subheader("📊 Technical Analysis Insights")
-    if technical_info:
-        summary = generate_summary(f"Summarize the following technical indicators:\n\n{technical_info}", provider)
-        st.info(summary)
-    else:
-        st.warning("⚠️ No technical data available.")
+    # --- Fetch company data ---
+    try:
+        company_info = get_stock_info(symbol)
+    except Exception:
+        company_info = {"longName": symbol, "longBusinessSummary": "⚠️ Company info not available."}
 
-    # Ask AI Section
-    st.subheader("💬 Ask AI Anything")
-    user_q = st.text_area("Type your question about this stock:")
-    if st.button("Generate Answer"):
-        if user_q.strip():
-            answer = generate_summary(user_q, provider)
-            st.markdown(f"**AI Answer:**\n\n{answer}")
-        else:
-            st.warning("Please enter a question to ask the AI.")
-####
+    try:
+        financials = get_all_financial_data(symbol)
+    except Exception:
+        financials = {}
 
+    try:
+        news_articles = fetch_news(symbol, page_size=5)
+        news_articles = analyze_sentiment(news_articles)
+    except Exception:
+        news_articles = []
+
+    # Prepare context
+    description = company_info.get("longBusinessSummary", "No description available.")
+    fin_data = str(financials)[:2000]  # truncate to avoid token overload
+    news_data = " | ".join([a.get("title", "") for a in news_articles[:5]])
+
+    # --- Generate summary ---
+    if st.button("✨ Generate AI Summary", use_container_width=True):
+        with st.spinner("Generating AI summary..."):
+            try:
+                summary = generate_llm_summary(
+                    company_name=company_info.get("longName", symbol),
+                    description=description,
+                    financials=fin_data,
+                    news=news_data,
+                    summary_style=summary_style,
+                    model=model_choice
+                )
+                st.success("✅ Summary generated successfully!")
+                st.markdown("### 📜 AI Summary")
+                st.write(summary)
+
+            except Exception as e:
+                st.error(f"Error generating summary: {e}")
+
+    # --- Optional raw data expander ---
+    with st.expander("📂 Raw Data Used for Summary"):
+        st.write("**Company Description:**")
+        st.write(description)
+
+        st.write("**Financials (truncated):**")
+        st.json(financials)
+
+        st.write("**Recent News Headlines:**")
+        for a in news_articles[:5]:
+            st.write(f"- {a.get('title', '')}")
