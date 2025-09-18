@@ -1,57 +1,67 @@
-# fetchers/llm_summary.py
+# marketscope_ai/fetchers/llm_summary.py
+from transformers import pipeline
 
-import os
-import requests
-from dotenv import load_dotenv
+# Initialize Hugging Face pipelines
+summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+sentiment_analyzer = pipeline("sentiment-analysis")
 
-# Load environment variables
-load_dotenv()
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+def generate_summary(text: str, max_length: int = 130, min_length: int = 30) -> str:
+    """Generate a concise summary of text."""
+    if not text.strip():
+        return "⚠️ No text provided for summarization."
+    try:
+        summary = summarizer(text, max_length=max_length, min_length=min_length, do_sample=False)
+        return summary[0]["summary_text"]
+    except Exception as e:
+        return f"❌ Error generating summary: {e}"
 
-BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+def analyze_sentiment(text: str) -> str:
+    """Classify sentiment as Bullish, Bearish, or Neutral."""
+    if not text.strip():
+        return "Neutral"
+    try:
+        result = sentiment_analyzer(text[:512])[0]  # limit tokens for safety
+        label = result["label"]
+        if label == "POSITIVE":
+            return "Bullish 📈"
+        elif label == "NEGATIVE":
+            return "Bearish 📉"
+        else:
+            return "Neutral ⚖️"
+    except Exception as e:
+        return f"❌ Error in sentiment: {e}"
 
-
-def generate_llm_summary(company_name, description, financials, news, summary_style, model="openai/gpt-4o-mini"):
+def generate_custom_summary(company: str, financials: str, news: str, style: str) -> dict:
     """
-    Generate an AI-powered summary for a company using OpenRouter API.
+    Generate a multi-section AI summary for a company.
+    Returns dict with overview, financials, news, sentiment, perspective.
+    """
+    # Combine inputs
+    combined_text = f"""
+    Company: {company}
+    Financials: {financials}
+    News: {news}
     """
 
-    if not OPENROUTER_API_KEY:
-        raise ValueError("⚠️ Missing OpenRouter API key. Please check your .env file.")
+    # Generate different parts
+    overview = generate_summary(f"{company} overview: {financials} {news}")
+    financial_summary = generate_summary(financials)
+    news_summary = generate_summary(news)
+    sentiment = analyze_sentiment(news + " " + financials)
 
-    # Build prompt
-    prompt = f"""
-    You are a financial analyst AI.
-    
-    Company: {company_name}
+    # Adjust tone/style
+    if style == "Analyst":
+        perspective = f"As an analyst, the outlook for {company} is {sentiment}."
+    elif style == "Investor":
+        perspective = f"From an investor’s perspective, {company} shows {sentiment} trends."
+    else:  # News style
+        perspective = f"Recent coverage suggests a {sentiment} stance for {company}."
 
-    --- Company Overview ---
-    {description}
-
-    --- Financial Highlights ---
-    {financials}
-
-    --- Recent News ---
-    {news}
-
-    Task: Provide a {summary_style} of this company. 
-    Keep it clear, concise, and structured.
-    """
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
+    return {
+        "overview": overview,
+        "financials": financial_summary,
+        "news": news_summary,
+        "sentiment": sentiment,
+        "perspective": perspective,
+        "raw_text": combined_text,
     }
-
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
-        "max_tokens": 500,
-    }
-
-    response = requests.post(BASE_URL, headers=headers, json=payload)
-    response.raise_for_status()
-
-    result = response.json()
-    return result["choices"][0]["message"]["content"]
